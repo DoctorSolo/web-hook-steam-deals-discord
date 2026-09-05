@@ -2,13 +2,33 @@ import requests
 import os
 from datetime import datetime
 
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'your url here')
 
 def get_steam_deals():
     response = requests.get(
         "https://store.steampowered.com/api/featured/"
     )
     return response.json()
+
+def is_adult_content(deal):
+    """Verifica se o jogo tem conteúdo adulto"""
+    # Verifica tags e descrições comuns de conteúdo +18
+    adult_keywords = [
+        'adult', 'nsfw', 'hentai', 'erotic', 'sexual', 
+        'nudity', 'mature', 'xxx', 'porn', 'ecchi',
+        'sex', 'femboy', 'futa', 'yaoi', 'yuri',
+        'fetish', 'bdsm', 'incest',
+    ]
+    
+    name = deal.get('name', '').lower()
+    description = deal.get('description', '').lower() if deal.get('description') else ''
+    
+    # Verifica keywords no nome e descrição
+    for keyword in adult_keywords:
+        if keyword in name or keyword in description:
+            return True
+    
+    return False
 
 def send_to_discord(data):
     # Combina todas as seções de promoções
@@ -35,10 +55,15 @@ def send_to_discord(data):
             seen_ids.add(appid)
             unique_deals.append(deal)
     
-    # Constrói a descrição com todas as promoções (mais espaçado)
+    # Filtra jogos +18
+    safe_deals = [deal for deal in unique_deals if not is_adult_content(deal)]
+    
+    print(f"Total: {len(unique_deals)} | Após filtro +18: {len(safe_deals)}")
+    
+    # Constrói a descrição com todas as promoções
     description = ""
     
-    for i, deal in enumerate(unique_deals[:10], 1):  # Limita a 10 para caber melhor
+    for i, deal in enumerate(safe_deals[:10], 1):
         name = deal.get('name', 'Unknown')
         header_image = deal.get('header_image', '')
         
@@ -82,7 +107,7 @@ def send_to_discord(data):
             "url": "https://store.steampowered.com/public/shared/images/responsive/logo_steam.svg"
         },
         "footer": {
-            "text": f"Atualizado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}",
+            "text": f"Atualizado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Filtro +18 ativo ✅",
             "icon_url": "https://store.steampowered.com/favicon.ico"
         }
     }
@@ -90,7 +115,7 @@ def send_to_discord(data):
     payload = {"embeds": [embed]}
     
     requests.post(WEBHOOK_URL, json=payload)
-    print(f"Enviadas {len(unique_deals[:10])} promoções!")
+    print(f"Enviadas {len(safe_deals[:10])} promoções (sem +18)!")
 
 if __name__ == "__main__":
     data = get_steam_deals()
