@@ -3,21 +3,18 @@ name: Steam Deals Notifier
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
-  workflow_dispatch:
+    - cron: "0 */6 * * *" # A cada 6 horas
+  workflow_dispatch: # Permite rodar manualmente
 
 jobs:
   notify:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Debug - List files
-        run: ls -la
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v7
         with:
           python-version: "3.10"
 
