@@ -133,7 +133,7 @@ def send_to_discord(data):
                 "image": {"url": header_image},
                 "footer": {
                     "text": f"Promoção {i} de {len(safe_deals)}",
-                    "icon_url": "https://store.steampowered.com/favicon.ico",
+                    "icon_url": "attachment://.github/assets/steam_icon.png",
                 },
             }
         )
