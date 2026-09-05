@@ -133,7 +133,7 @@ def send_to_discord(data):
                 "image": {"url": header_image},
                 "footer": {
                     "text": f"Promoção {i} de {len(safe_deals)}",
-                    "icon_url": "https://github.com/DoctorSolo/web-hook-steam-deals-discord/blob/main/.github/assets/social.png?raw=true",
+                    "icon_url": "https://github.com/DoctorSolo/web-hook-steam-deals-discord/blob/main/.github/assets/steam.png?raw=true",
                 },
             }
         )
