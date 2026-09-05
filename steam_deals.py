@@ -1,122 +1,155 @@
-import requests
 import os
-from datetime import datetime
+import time
+import requests
 
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', 'your url here')
+WEBHOOK_URL = os.environ.get(
+    'WEBHOOK_URL',
+    'YOUR_DISCORD_WEBHOOK_URL_HERE'  # Substitua pelo seu webhook do Discord
+)
+
+# IDs oficiais de conteúdo adulto da Valve
+ADULT_CONTENT_DESCRIPTOR_IDS = {2, 4}  # 2: Nudez/Sexual, 4: Adult Only explícito
+
 
 def get_steam_deals():
+    headers = {
+        # Evita herdar permissões de visualização adulta
+        "Cookie": "wants_mature_content=0; birthtime=1072915201;"
+    }
     response = requests.get(
-        "https://store.steampowered.com/api/featured/"
+        "https://store.steampowered.com/api/featured/",
+        headers=headers,
+        timeout=10,
     )
     return response.json()
 
-def is_adult_content(deal):
-    """Verifica se o jogo tem conteúdo adulto"""
-    # Verifica tags e descrições comuns de conteúdo +18
-    adult_keywords = [
-        'adult', 'nsfw', 'hentai', 'erotic', 'sexual', 
-        'nudity', 'mature', 'xxx', 'porn', 'ecchi',
-        'sex', 'femboy', 'futa', 'yaoi', 'yuri',
-        'fetish', 'bdsm', 'incest',
-    ]
-    
-    name = deal.get('name', '').lower()
-    description = deal.get('description', '').lower() if deal.get('description') else ''
-    
-    # Verifica keywords no nome e descrição
-    for keyword in adult_keywords:
-        if keyword in name or keyword in description:
+
+def is_mature_or_adult(app_id):
+    """Consulta a API de detalhes do app para verificar restrições etárias e descritores."""
+    try:
+        url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&filters=basic,ratings,content_descriptors"
+        res = requests.get(url, timeout=5).json()
+
+        if not res or not res.get(str(app_id), {}).get("success"):
+            return False
+
+        data = res[str(app_id)]["data"]
+
+        # 1. Checa idade mínima registrada (ex: 18)
+        required_age = data.get("required_age", 0)
+        if isinstance(required_age, str) and required_age.isdigit():
+            required_age = int(required_age)
+        if required_age >= 18:
             return True
-    
+
+        # 2. Checa descritores de conteúdo adulto oficiais da Steam
+        descriptors = (
+            data.get("content_descriptors", {}).get("ids", [])
+        )
+        if any(desc_id in ADULT_CONTENT_DESCRIPTOR_IDS for desc_id in descriptors):
+            return True
+
+    except Exception as e:
+        print(f"Erro ao validar appid {app_id}: {e}")
+
     return False
 
+
+def is_adult_content_fallback(deal):
+    """Filtro textual leve apenas como redundância secundária."""
+    adult_keywords = {
+        "hentai",
+        "erotic",
+        "sexual",
+        "xxx",
+        "porn",
+        "ecchi",
+        "fetish",
+        "lewd",
+    }
+    name = deal.get("name", "").lower()
+    return any(kw in name for kw in adult_keywords)
+
+
 def send_to_discord(data):
-    # Combina todas as seções de promoções
     all_deals = []
-    
-    if 'large_capsules' in data:
-        all_deals.extend(data['large_capsules'])
-    
-    if 'featured_win' in data:
-        all_deals.extend(data['featured_win'])
-    
-    if 'featured_mac' in data:
-        all_deals.extend(data['featured_mac'])
-    
-    if 'featured_linux' in data:
-        all_deals.extend(data['featured_linux'])
-    
-    # Remove duplicatas por appid
+    for key in ("large_capsules", "featured_win", "featured_mac", "featured_linux"):
+        if key in data:
+            all_deals.extend(data[key])
+
     seen_ids = set()
     unique_deals = []
     for deal in all_deals:
-        appid = deal.get('id')
+        appid = deal.get("id")
         if appid and appid not in seen_ids:
             seen_ids.add(appid)
             unique_deals.append(deal)
-    
-    # Filtra jogos +18
-    safe_deals = [deal for deal in unique_deals if not is_adult_content(deal)]
-    
-    print(f"Total: {len(unique_deals)} | Após filtro +18: {len(safe_deals)}")
-    
-    # Constrói a descrição com todas as promoções
-    description = ""
-    
-    for i, deal in enumerate(safe_deals[:10], 1):
-        name = deal.get('name', 'Unknown')
-        header_image = deal.get('header_image', '')
-        
-        # Tratamento seguro para preços
-        final_price_raw = deal.get('final_price')
-        original_price_raw = deal.get('original_price')
-        
+
+    safe_deals = []
+    for deal in unique_deals:
+        appid = deal.get("id")
+
+        # Primeiro teste rápido por texto no título
+        if is_adult_content_fallback(deal):
+            continue
+
+        # Validação profunda via descritores da Steam (apenas até preencher a lista)
+        if is_mature_or_adult(appid):
+            continue
+
+        safe_deals.append(deal)
+        if len(safe_deals) == 10:  # Discord suporta no máximo 10 embeds
+            break
+
+    print(f"Total avaliados: {len(unique_deals)} | Selecionados: {len(safe_deals)}")
+
+    embeds = []
+    for i, deal in enumerate(safe_deals, 1):
+        name = deal.get("name", "Unknown")
+        header_image = deal.get("header_image", "")
+
+        final_price_raw = deal.get("final_price")
+        original_price_raw = deal.get("original_price")
+
         final_price = float(final_price_raw) / 100 if final_price_raw else 0
         original_price = float(original_price_raw) / 100 if original_price_raw else 0
-        
-        # Calcula desconto
+
         discount = 0
         if original_price > 0 and final_price < original_price:
             discount = int(((original_price - final_price) / original_price) * 100)
-        
-        # Formata o item com mais espaçamento
-        description += f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        description += f"**{i}. 🎮 {name}**\n\n"
-        
-        if header_image:
-            description += f"[📷 Ver Imagem]({header_image})\n\n"
-        
-        if discount > 0:
-            description += f"💰 **R$ {final_price:.2f}** ~~R$ {original_price:.2f}~~\n"
-            description += f"🏷️ **-{discount}% OFF**\n\n"
-        else:
-            description += f"💰 **R$ {final_price:.2f}**\n\n"
-        
-        description += f"[🔗 Acessar na Steam](https://store.steampowered.com/app/{deal.get('id')})\n\n"
-    
-    # Se não houver promoções
-    if not description:
-        description = "Nenhuma promoção encontrada no momento. 😔"
-    
-    # Cria um único embed
-    embed = {
-        "title": "🎮 Promoções da Steam",
-        "description": description,
-        "color": 0x1b2838,
-        "thumbnail": {
-            "url": "https://store.steampowered.com/public/shared/images/responsive/logo_steam.svg"
-        },
-        "footer": {
-            "text": f"Atualizado em {datetime.now().strftime('%d/%m/%Y às %H:%M')} | Filtro +18 ativo ✅",
-            "icon_url": "https://store.steampowered.com/favicon.ico"
-        }
-    }
-    
-    payload = {"embeds": [embed]}
-    
-    requests.post(WEBHOOK_URL, json=payload)
-    print(f"Enviadas {len(safe_deals[:10])} promoções (sem +18)!")
+
+        price_text = (
+            f"💰 **R$ {final_price:.2f}** ~~R$ {original_price:.2f}~~\n🏷️ **-{discount}% OFF**"
+            if discount > 0
+            else f"💰 **R$ {final_price:.2f}**"
+        )
+
+        embeds.append(
+            {
+                "title": f"{i}. 🎮 {name}",
+                "url": f"https://store.steampowered.com/app/{deal.get('id')}",
+                "description": price_text,
+                "color": 0x1B2838,
+                "image": {"url": header_image},
+                "footer": {
+                    "text": f"Promoção {i} de {len(safe_deals)}",
+                    "icon_url": "https://store.steampowered.com/favicon.ico",
+                },
+            }
+        )
+
+    if not embeds:
+        embeds = [{
+            "title": "🎮 Promoções da Steam",
+            "description": "Nenhuma promoção encontrada no momento.",
+            "color": 0x1B2838,
+        }]
+
+    if WEBHOOK_URL:
+        requests.post(WEBHOOK_URL, json={"embeds": embeds}, timeout=10)
+        print(f"Enviadas {len(embeds)} promoções com imagens!")
+
 
 if __name__ == "__main__":
-    data = get_steam_deals()
-    send_to_discord(data)
+    deals_data = get_steam_deals()
+    send_to_discord(deals_data)
